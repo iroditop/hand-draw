@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Hand-Draw App · рисуй рукой</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background: #0b0d10;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+            padding: 12px;
+        }
+
+        .app-container {
+            position: relative;
+            width: 100%;
+            max-width: 900px;
+            aspect-ratio: 4 / 3;
+            background: #1a1e24;
+            border-radius: 32px;
+            box-shadow: 0 25px 40px -12px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.04);
+            overflow: hidden;
+        }
+
+        #videoElement {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+            z-index: 1;
+            filter: brightness(0.85) contrast(1.05);
+        }
+
+        #drawingCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: block;
+            z-index: 3;
+            pointer-events: none;
+        }
+
+        #skeletonCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: block;
+            z-index: 4;
+            pointer-events: none;
+        }
+
+        .gradient-overlay {
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at 50% 50%, transparent 35%, rgba(0, 0, 0, 0.35) 100%);
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        /* ---------- компактная вертикальная панель справа ---------- */
+        .toolbar {
+            position: absolute;
+            top: 50%;
+            right: 12px;
+            transform: translateY(-50%);
+            z-index: 20;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 8px;
+            background: rgba(20, 24, 30, 0.82);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border-radius: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+            pointer-events: auto;
+            max-height: 92%;
+            overflow-y: auto;
+        }
+
+        .toolbar::-webkit-scrollbar { width: 0; }
+
+        .toolbar-group {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .toolbar-divider {
+            width: 22px;
+            height: 1px;
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        /* --- инструменты (рисование / ластик / очистка) --- */
+        .tool-btn {
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            border-radius: 50%;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            background: rgba(255, 255, 255, 0.04);
+            color: #eef3fc;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s, transform 0.1s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: inherit;
+        }
+
+        .tool-btn:hover {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+
+        .tool-btn.active {
+            background: rgba(255, 255, 255, 0.18);
+            border-color: rgba(255, 255, 255, 0.6);
+            transform: scale(1.08);
+        }
+
+        .tool-btn.danger.active {
+            background: rgba(239, 68, 68, 0.3);
+            border-color: rgba(239, 68, 68, 0.8);
+        }
+
+        /* --- цвета --- */
+        .color-swatch {
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            cursor: pointer;
+            transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+            flex-shrink: 0;
+            padding: 0;
+        }
+
+        .color-swatch:hover { transform: scale(1.15); }
+
+        .color-swatch.active {
+            border-color: #ffffff;
+            box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.4);
+            transform: scale(1.12);
+        }
+
+        /* --- размеры --- */
+        .size-btn {
+            width: 30px;
+            height: 30px;
+            padding: 0;
+            border-radius: 50%;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            background: rgba(255, 255, 255, 0.04);
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s, transform 0.1s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .size-btn:hover {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+
+        .size-btn.active {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.7);
+            transform: scale(1.08);
+        }
+
+        .size-dot {
+            display: block;
+            border-radius: 50%;
+            background: #ffffff;
+            transition: width 0.15s, height 0.15s, background 0.2s;
+        }
+
+        /* --- статус --- */
+        .status-pill {
+            position: absolute;
+            bottom: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            background: rgba(20, 24, 30, 0.75);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            padding: 8px 18px;
+            border-radius: 40px;
+            color: #eef3fc;
+            font-size: 0.9rem;
+            font-weight: 500;
+            letter-spacing: 0.3px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            white-space: nowrap;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #4ade80;
+            box-shadow: 0 0 8px #4ade80;
+            transition: background 0.2s, box-shadow 0.2s;
+        }
+
+        .status-dot.drawing {
+            background: #f97316;
+            box-shadow: 0 0 12px #f97316;
+        }
+
+        .status-dot.erasing {
+            background: #ef4444;
+            box-shadow: 0 0 12px #ef4444;
+        }
+
+        .status-dot.cleared {
+            background: #38bdf8;
+            box-shadow: 0 0 12px #38bdf8;
+        }
+
+        .hint {
+            position: absolute;
+            top: 14px;
+            left: 14px;
+            z-index: 10;
+            background: rgba(0, 0, 0, 0.45);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            padding: 6px 12px;
+            border-radius: 30px;
+            color: #cfd9e6;
+            font-size: 0.7rem;
+            font-weight: 400;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            pointer-events: none;
+            max-width: 60%;
+            line-height: 1.4;
+        }
+
+        /* Адаптив */
+        @media (max-width: 640px) {
+            .toolbar { right: 8px; gap: 8px; padding: 8px 6px; }
+            .tool-btn { width: 28px; height: 28px; font-size: 0.75rem; }
+            .color-swatch { width: 18px; height: 18px; }
+            .size-btn { width: 26px; height: 26px; }
+            .hint { display: none; }
+            .status-pill { font-size: 0.75rem; padding: 6px 14px; }
+        }
+    </style>
+</head>
+<body>
+<div class="app-container" id="appContainer">
+    <video id="videoElement" autoplay playsinline muted></video>
+    <canvas id="drawingCanvas"></canvas>
+    <canvas id="skeletonCanvas"></canvas>
+    <div class="gradient-overlay"></div>
+
+    <!-- Вертикальная панель справа -->
+    <div class="toolbar" id="toolbar">
+        <!-- Инструменты -->
+        <div class="toolbar-group">
+            <button class="tool-btn active" id="drawToolBtn" title="Рисовать">✏️</button>
+            <button class="tool-btn" id="eraseToolBtn" title="Ластик">🧽</button>
+            <button class="tool-btn danger" id="clearBtn" title="Стереть всё">🗑️</button>
+        </div>
+
+        <div class="toolbar-divider"></div>
+
+        <!-- Цвета -->
+        <div class="toolbar-group" id="colorGroup"></div>
+
+        <div class="toolbar-divider"></div>
+
+        <!-- Размеры -->
+        <div class="toolbar-group" id="sizeGroup"></div>
+    </div>
+
+    <div class="hint">✋ сведи большой и указательный палец — рисуй<br>👆 дважды сведи — стереть всё</div>
+
+    <div class="status-pill">
+        <span id="statusDot" class="status-dot"></span>
+        <span id="statusText">готов</span>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
+<script>
+    (function() {
+        "use strict";
+
+        // ---------- DOM ----------
+        const video = document.getElementById('videoElement');
+        const canvas = document.getElementById('drawingCanvas');
+        const ctx = canvas.getContext('2d');
+        const skeletonCanvas = document.getElementById('skeletonCanvas');
+        const sctx = skeletonCanvas.getContext('2d');
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const colorGroup = document.getElementById('colorGroup');
+        const sizeGroup = document.getElementById('sizeGroup');
+        const drawToolBtn = document.getElementById('drawToolBtn');
+        const eraseToolBtn = document.getElementById('eraseToolBtn');
+        const clearBtn = document.getElementById('clearBtn');
+
+        // ---------- настройки ----------
+        const COLORS = [
+            { name: 'Белый',       value: '#ffffff' },
+            { name: 'Красный',     value: '#ef4444' },
+            { name: 'Оранжевый',   value: '#f97316' },
+            { name: 'Жёлтый',      value: '#facc15' },
+            { name: 'Зелёный',     value: '#22c55e' },
+            { name: 'Голубой',     value: '#38bdf8' },
+            { name: 'Синий',       value: '#3b82f6' },
+            { name: 'Фиолетовый',  value: '#a855f7' },
+            { name: 'Розовый',     value: '#ec4899' },
+        ];
+
+        const SIZES = [
+            { name: 'XS', value: 2 },
+            { name: 'S',  value: 4 },
+            { name: 'M',  value: 7 },
+            { name: 'L',  value: 12 },
+            { name: 'XL', value: 20 },
+        ];
+
+        let currentColor = '#ffffff';
+        let currentSize = 2;
+        let mode = 'draw';
+
+        // рисование
+        let isDrawing = false;
+        let lastX = null;
+        let lastY = null;
+        const SMOOTHING = 0.5;
+
+        // размеры
+        let canvasWidth = 0;
+        let canvasHeight = 0;
+
+        // ---------- ДВОЙНОЙ ЩИПОК (очистка) ----------
+        let lastPinchEndTime = 0;         // время завершения предыдущего щипка
+        const DOUBLE_PINCH_WINDOW = 450;  // мс между двумя щипками
+        let pinchStartTime = 0;           // когда начался текущий щипок
+        const MIN_PINCH_DURATION = 30;    // минимальная длительность щипка, чтобы считался
+        let wasPinching = false;          // предыдущее состояние
+        let pinchHandled = false;         // чтобы двойной щипок не срабатывал при рисовании
+
+        // ---------- соединения скелета ----------
+        const HAND_CONNECTIONS = [
+            [0,1],[1,2],[2,3],[3,4],
+            [0,5],[5,6],[6,7],[7,8],
+            [5,9],[9,10],[10,11],[11,12],
+            [9,13],[13,14],[14,15],[15,16],
+            [13,17],[17,18],[18,19],[19,20],
+            [0,17]
+        ];
+
+        // ---------- ресайз ----------
+        function resizeCanvases() {
+            const rect = canvas.parentElement.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+
+            canvasWidth = rect.width;
+            canvasHeight = rect.height;
+
+            canvas.width = Math.round(canvasWidth * dpr);
+            canvas.height = Math.round(canvasHeight * dpr);
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+            skeletonCanvas.width = Math.round(canvasWidth * dpr);
+            skeletonCanvas.height = Math.round(canvasHeight * dpr);
+            sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+            applyBrushStyle();
+
+            lastX = null;
+            lastY = null;
+            ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+        }
+
+        function applyBrushStyle() {
+            if (mode === 'erase') {
+                ctx.lineWidth = currentSize * 4;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                ctx.globalCompositeOperation = 'destination-out';
+                ctx.shadowBlur = 0;
+                ctx.shadowColor = 'transparent';
+                ctx.strokeStyle = 'rgba(0,0,0,1)';
+            } else {
+                ctx.lineWidth = currentSize;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.strokeStyle = currentColor;
+                if (currentColor === '#ffffff') {
+                    ctx.shadowColor = 'rgba(255, 255, 255, 0.6)';
+                    ctx.shadowBlur = 8;
+                } else {
+                    ctx.shadowColor = currentColor;
+                    ctx.shadowBlur = 6;
+                }
+            }
+        }
+
+        function clearDrawing() {
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+            lastX = null;
+            lastY = null;
+        }
+
+        // ---------- вспышка статуса "очищено" ----------
+        function flashClearedStatus() {
+            statusDot.classList.add('cleared');
+            statusText.textContent = 'стёрто';
+            setTimeout(() => {
+                statusDot.classList.remove('cleared');
+                if (!isDrawing) setStatus('idle');
+            }, 600);
+        }
+
+        // ---------- статус ----------
+        function setStatus(state) {
+            statusDot.classList.remove('drawing', 'erasing', 'cleared');
+            if (state === 'drawing') {
+                statusDot.classList.add('drawing');
+                statusText.textContent = 'рисование';
+            } else if (state === 'erasing') {
+                statusDot.classList.add('erasing');
+                statusText.textContent = 'ластик';
+            } else {
+                statusText.textContent = 'готов';
+            }
+        }
+
+        // ---------- рисование ----------
+        function drawLineTo(x, y) {
+            if (!canvasWidth || !canvasHeight) return;
+            if (lastX === null || lastY === null) {
+                lastX = x;
+                lastY = y;
+                return;
+            }
+
+            const smoothX = lastX + (x - lastX) * SMOOTHING;
+            const smoothY = lastY + (y - lastY) * SMOOTHING;
+
+            ctx.beginPath();
+            ctx.moveTo(lastX, lastY);
+            ctx.lineTo(smoothX, smoothY);
+            ctx.stroke();
+
+            lastX = smoothX;
+            lastY = smoothY;
+        }
+
+        // ---------- скелет руки ----------
+        function drawSkeleton(landmarks) {
+            sctx.clearRect(0, 0, canvasWidth, canvasHeight);
+            if (!landmarks || landmarks.length < 21) return;
+
+            const pts = landmarks.map(lm => ({
+                x: (1 - lm.x) * canvasWidth,
+                y: lm.y * canvasHeight,
+            }));
+
+            sctx.lineWidth = 2.5;
+            sctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+            sctx.shadowColor = 'rgba(255, 255, 255, 0.7)';
+            sctx.shadowBlur = 6;
+            sctx.lineCap = 'round';
+
+            for (const [a, b] of HAND_CONNECTIONS) {
+                sctx.beginPath();
+                sctx.moveTo(pts[a].x, pts[a].y);
+                sctx.lineTo(pts[b].x, pts[b].y);
+                sctx.stroke();
+            }
+
+            sctx.shadowBlur = 0;
+            for (let i = 0; i < pts.length; i++) {
+                const p = pts[i];
+                sctx.beginPath();
+                sctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2);
+                sctx.fillStyle = '#ffffff';
+                sctx.fill();
+                sctx.lineWidth = 1.5;
+                sctx.strokeStyle = 'rgba(255, 180, 100, 0.95)';
+                sctx.stroke();
+            }
+
+            const thumbTip = pts[4];
+            const indexTip = pts[8];
+
+            for (const p of [thumbTip, indexTip]) {
+                sctx.beginPath();
+                sctx.arc(p.x, p.y, 8, 0, Math.PI * 2);
+                sctx.strokeStyle = 'rgba(255, 100, 100, 0.9)';
+                sctx.lineWidth = 2;
+                sctx.stroke();
+            }
+
+            const dx = thumbTip.x - indexTip.x;
+            const dy = thumbTip.y - indexTip.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            const minDim = Math.min(canvasWidth, canvasHeight);
+            let threshold = Math.max(28, Math.min(65, minDim * 0.06));
+
+            if (dist < threshold * 2) {
+                sctx.beginPath();
+                sctx.setLineDash([6, 6]);
+                sctx.lineWidth = 2;
+                sctx.strokeStyle = dist < threshold ? '#4ade80' : 'rgba(255,255,255,0.5)';
+                sctx.moveTo(thumbTip.x, thumbTip.y);
+                sctx.lineTo(indexTip.x, indexTip.y);
+                sctx.stroke();
+                sctx.setLineDash([]);
+            }
+        }
+
+        // ---------- UI ----------
+        function buildColorSwatches() {
+            colorGroup.innerHTML = '';
+            COLORS.forEach((color) => {
+                const btn = document.createElement('button');
+                btn.className = 'color-swatch' + (color.value === currentColor ? ' active' : '');
+                btn.style.background = color.value;
+                btn.title = color.name;
+                btn.dataset.color = color.value;
+
+                if (color.value === '#ffffff') {
+                    btn.style.border = '2px solid rgba(0,0,0,0.3)';
+                }
+
+                btn.addEventListener('click', () => {
+                    currentColor = color.value;
+                    setMode('draw');
+                    applyBrushStyle();
+                    document.querySelectorAll('.color-swatch').forEach(el => el.classList.remove('active'));
+                    btn.classList.add('active');
+                    updateSizeDotsColor();
+                });
+
+                colorGroup.appendChild(btn);
+            });
+        }
+
+        function buildSizeButtons() {
+            sizeGroup.innerHTML = '';
+            SIZES.forEach((size) => {
+                const btn = document.createElement('button');
+                btn.className = 'size-btn' + (size.value === currentSize ? ' active' : '');
+                btn.title = size.name;
+
+                const dot = document.createElement('span');
+                dot.className = 'size-dot';
+                const dotSize = Math.max(3, Math.min(14, size.value * 0.9));
+                dot.style.width = dotSize + 'px';
+                dot.style.height = dotSize + 'px';
+                dot.style.background = currentColor;
+
+                btn.appendChild(dot);
+
+                btn.addEventListener('click', () => {
+                    currentSize = size.value;
+                    applyBrushStyle();
+                    document.querySelectorAll('.size-btn').forEach(el => el.classList.remove('active'));
+                    btn.classList.add('active');
+                });
+
+                sizeGroup.appendChild(btn);
+            });
+        }
+
+        function updateSizeDotsColor() {
+            document.querySelectorAll('.size-dot').forEach(dot => {
+                dot.style.background = currentColor;
+            });
+        }
+
+        function setMode(newMode) {
+            mode = newMode;
+            drawToolBtn.classList.toggle('active', mode === 'draw');
+            eraseToolBtn.classList.toggle('active', mode === 'erase');
+            applyBrushStyle();
+
+            if (mode === 'erase') {
+                document.querySelectorAll('.color-swatch').forEach(el => el.classList.remove('active'));
+            } else {
+                document.querySelectorAll('.color-swatch').forEach(el => {
+                    if (el.dataset.color === currentColor) el.classList.add('active');
+                });
+            }
+        }
+
+        // ---------- MediaPipe ----------
+        let hands = null;
+
+        function onResults(results) {
+            // нет рук
+            if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+                sctx.clearRect(0, 0, canvasWidth, canvasHeight);
+                if (isDrawing) {
+                    isDrawing = false;
+                    lastX = null;
+                    lastY = null;
+                }
+                // сбрасываем двойной щипок, если рука пропала
+                if (wasPinching) {
+                    // если рука ушла во время щипка — завершаем его
+                    const now = performance.now();
+                    if (now - pinchStartTime > MIN_PINCH_DURATION) {
+                        lastPinchEndTime = now;
+                    }
+                }
+                wasPinching = false;
+                pinchHandled = false;
+                setStatus('idle');
+                return;
+            }
+
+            const landmarks = results.multiHandLandmarks[0];
+            if (!landmarks || landmarks.length < 21) return;
+
+            drawSkeleton(landmarks);
+
+            const thumbTip = landmarks[4];
+            const indexTip = landmarks[8];
+
+            const thumbX = (1 - thumbTip.x) * canvasWidth;
+            const thumbY = thumbTip.y * canvasHeight;
+            const indexX = (1 - indexTip.x) * canvasWidth;
+            const indexY = indexTip.y * canvasHeight;
+
+            const dx = indexX - thumbX;
+            const dy = indexY - thumbY;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            const minDim = Math.min(canvasWidth, canvasHeight);
+            let threshold = Math.max(28, Math.min(65, minDim * 0.06));
+            const pinching = distance < threshold;
+
+            // ---- ОБРАБОТКА ЩИПКА ----
+            const now = performance.now();
+
+            // Начало щипка
+            if (pinching && !wasPinching) {
+                pinchStartTime = now;
+                pinchHandled = false;
+            }
+
+            // Конец щипка
+            if (!pinching && wasPinching) {
+                const duration = now - pinchStartTime;
+                if (duration > MIN_PINCH_DURATION) {
+                    // проверяем, был ли предыдущий щипок недавно
+                    if (now - lastPinchEndTime < DOUBLE_PINCH_WINDOW) {
+                        // ДВОЙНОЙ ЩИПОК — стираем всё
+                        clearDrawing();
+                        flashClearedStatus();
+                        lastPinchEndTime = 0; // сбрасываем, чтобы тройной не сработал
+                        pinchHandled = true;
+                    } else {
+                        lastPinchEndTime = now;
+                    }
+                }
+            }
+
+            wasPinching = pinching;
+
+            // ---- РИСОВАНИЕ ----
+            if (pinching && !pinchHandled) {
+                if (!isDrawing) {
+                    lastX = null;
+                    lastY = null;
+                    isDrawing = true;
+                }
+                setStatus(mode === 'erase' ? 'erasing' : 'drawing');
+                const midX = (thumbX + indexX) / 2;
+                const midY = (thumbY + indexY) / 2;
+                drawLineTo(midX, midY);
+            } else if (!pinching) {
+                if (isDrawing) {
+                    isDrawing = false;
+                    lastX = null;
+                    lastY = null;
+                }
+                if (!pinchHandled) setStatus('idle');
+            }
+        }
+
+        async function initHandTracking() {
+            if (typeof Hands === 'undefined') {
+                console.error('MediaPipe Hands не загружен');
+                statusText.textContent = 'ошибка библиотеки';
+                return;
+            }
+
+            hands = new Hands({
+                locateFile: (file) => {
+                    return `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}`;
+                }
+            });
+
+            hands.setOptions({
+                maxNumHands: 1,
+                modelComplexity: 0,
+                minDetectionConfidence: 0.7,
+                minTrackingConfidence: 0.6,
+            });
+
+            hands.onResults(onResults);
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+                    audio: false,
+                });
+
+                video.srcObject = stream;
+                await new Promise((resolve) => {
+                    video.onloadedmetadata = () => resolve();
+                });
+
+                const processFrame = async () => {
+                    if (video.readyState === 4 && hands) {
+                        try { await hands.send({ image: video }); } catch (e) {}
+                    }
+                    requestAnimationFrame(processFrame);
+                };
+                requestAnimationFrame(processFrame);
+            } catch (err) {
+                console.error('Ошибка камеры:', err);
+                statusText.textContent = 'нет доступа к камере';
+                statusDot.style.background = '#ef4444';
+                statusDot.style.boxShadow = '0 0 8px #ef4444';
+            }
+        }
+
+        // ---------- старт ----------
+        window.addEventListener('load', () => {
+            buildColorSwatches();
+            buildSizeButtons();
+            resizeCanvases();
+
+            drawToolBtn.addEventListener('click', () => setMode('draw'));
+            eraseToolBtn.addEventListener('click', () => setMode('erase'));
+            clearBtn.addEventListener('click', () => {
+                clearDrawing();
+                flashClearedStatus();
+            });
+
+            window.addEventListener('resize', () => {
+                resizeCanvases();
+                applyBrushStyle();
+            });
+
+            // двойной клик тоже очищает (для мышки)
+            document.getElementById('appContainer').addEventListener('dblclick', () => {
+                clearDrawing();
+                flashClearedStatus();
+            });
+
+            initHandTracking();
+        });
+
+        window.addEventListener('beforeunload', () => {
+            if (hands) hands.close().catch(() => {});
+        });
+
+    })();
+</script>
+</body>
+</html>
